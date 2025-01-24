@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd" version="1.1" creator="gpx.py -- https://github.com/tkrajina/gpxpy">
+  <wpt lat="51.92317251485834" lon="4.479237887227551">
+    <name>1. Rotterdam</name>
+  </wpt>
+  <wpt lat="52.011787931021225" lon="4.358554708017199">
+    <name>2. Delft</name>
+  </wpt>
+  <wpt lat="52.15813201149557" lon="4.491445566869718">
+    <name>3. Leiden</name>
+  </wpt>
+  <wpt lat="52.01183651288876" lon="4.710537149361849">
+    <name>4. Gouda</name>
+  </wpt>
+  <trk>
+    <trkseg>
+      <trkpt lat="51.92317251485834" lon="4.479237887227551">
+      </trkpt>
+      <trkpt lat="52.011787931021225" lon="4.358554708017199">
+      </trkpt>
+      <trkpt lat="52.15813201149557" lon="4.491445566869718">
+      </trkpt>
+      <trkpt lat="52.01183651288876" lon="4.710537149361849">
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>
