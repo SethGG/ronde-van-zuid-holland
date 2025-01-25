@@ -1,10 +1,9 @@
 import pandas as pd
-import gpxpy
-import gpxpy.gpx
 import folium
 from folium.plugins import BeautifyIcon
 import matplotlib
 import matplotlib.colors as mcolors
+import numpy as np
 
 df = pd.read_csv("gemeentehuizen.csv")
 df.columns = ["Municipality", "Latitude", "Longitude"]
@@ -32,35 +31,10 @@ def get_coordinates(municipality):
     return row.iloc[0]["Longitude"], row.iloc[0]["Latitude"]
 
 
-def create_gpx(municipalities):
-    """Generate a GPX file with waypoints and straight-line routes between municipalities."""
-    gpx = gpxpy.gpx.GPX()
-
-    # Add waypoints (municipalities)
-    for i, municipality in enumerate(municipalities):
-        lon, lat = get_coordinates(municipality)
-        waypoint = gpxpy.gpx.GPXWaypoint(latitude=lat, longitude=lon, name=f"{i+1}. {municipality}")
-        gpx.waypoints.append(waypoint)
-
-    # Add track with straight-line segments
-    gpx_track = gpxpy.gpx.GPXTrack()
-    gpx.tracks.append(gpx_track)
-    gpx_segment = gpxpy.gpx.GPXTrackSegment()
-    gpx_track.segments.append(gpx_segment)
-
-    for municipality in municipalities:
-        lon, lat = get_coordinates(municipality)
-        gpx_segment.points.append(gpxpy.gpx.GPXTrackPoint(latitude=lat, longitude=lon))
-
-    with open("cycling_route.gpx", "w") as f:
-        f.write(gpx.to_xml())
-    print("GPX file saved as cycling_route.gpx")
-
-
 def show_map(municipalities):
     """Display a map with the cycling route and numbered markers using BeautifyIcon."""
-    first_lon, first_lat = get_coordinates(municipalities[0])
-    m = folium.Map(location=[first_lat, first_lon], zoom_start=10)
+    mean_lon, mean_lat = np.mean([get_coordinates(m) for m in municipalities], axis=0)
+    m = folium.Map(location=[mean_lat, mean_lon], zoom_start=10)
 
     route_coords = [get_coordinates(m) for m in municipalities]
 
@@ -92,7 +66,6 @@ def show_map(municipalities):
 
 if __name__ == "__main__":
     municipalities = ["Rotterdam", "Delft", "Leiden", "Gouda", "Noordwijk"]
-    # create_gpx(municipalities)
 
     # Show the route on a map
     show_map(municipalities)

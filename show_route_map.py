@@ -36,7 +36,7 @@ def run_webview():
     window = webview.create_window("Cycling Route Map", HTML_FILE_PATH, width=800, height=600)
 
     # Start a background thread to monitor for the refresh signal
-    threading.Thread(target=monitor_for_refresh, args=(window,), daemon=True).start()
+    # threading.Thread(target=monitor_for_refresh, args=(window,), daemon=True).start()
 
     webview.start()
 
