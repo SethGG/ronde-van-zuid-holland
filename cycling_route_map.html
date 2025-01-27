@@ -27,7 +27,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
-                #map_9e92ea505ad7308e074a1a9891cd94dd {
+                #map_5d11f98baad8da9070a9e41f60ac1c5a {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -41,16 +41,16 @@
 </head>
 <body>
     
-    <h1 style="position:absolute;z-index:100000;left:6rem" >Generation: <span id=gen></span></h1>
+    <div style="position:absolute;z-index:100000;left:6rem"><h1 style="margin-bottom:0">Generation: <span id=gen></span></h1><h2>Best Fitness: <span id=fit></span></h2></div>
     
-            <div class="folium-map" id="map_9e92ea505ad7308e074a1a9891cd94dd" ></div>
+            <div class="folium-map" id="map_5d11f98baad8da9070a9e41f60ac1c5a" ></div>
         
 </body>
 <script>
     
     
-            var map_9e92ea505ad7308e074a1a9891cd94dd = L.map(
-                "map_9e92ea505ad7308e074a1a9891cd94dd",
+            var map_5d11f98baad8da9070a9e41f60ac1c5a = L.map(
+                "map_5d11f98baad8da9070a9e41f60ac1c5a",
                 {
                     center: [52.0205272081141, 4.537304129039721],
                     crs: L.CRS.EPSG3857,
@@ -67,7 +67,7 @@
 
         
     
-            var tile_layer_9433e72c3882684d0680cdf7f1e6ea27 = L.tileLayer(
+            var tile_layer_fd58b6a38b70087fb45dd7913f2a255d = L.tileLayer(
                 "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                 {
   "minZoom": 0,
@@ -84,10 +84,10 @@
             );
         
     
-            tile_layer_9433e72c3882684d0680cdf7f1e6ea27.addTo(map_9e92ea505ad7308e074a1a9891cd94dd);
+            tile_layer_fd58b6a38b70087fb45dd7913f2a255d.addTo(map_5d11f98baad8da9070a9e41f60ac1c5a);
         
     
-            var realtime_159200322c05617048d3820a5cadc5c5 = L.realtime(
+            var realtime_893d5e79113e5c3f789593e73fd6dd76 = L.realtime(
             (responseHandler, errorHandler) => {
                     url = 'http://127.0.0.1:5000/route.geojson';
 
@@ -95,6 +95,7 @@
                     .then(function(response) {
                         console.log(response.headers.get('Generation'));
                         document.getElementById('gen').innerText = response.headers.get('Generation');
+                        document.getElementById('fit').innerText = response.headers.get('Best-Fitness');
                         return response.json();
                     })
                     .then(responseHandler)
@@ -131,12 +132,12 @@
   "removeMissing": false,
 }
             );
-            map_9e92ea505ad7308e074a1a9891cd94dd.addLayer(
-                realtime_159200322c05617048d3820a5cadc5c5._container
+            map_5d11f98baad8da9070a9e41f60ac1c5a.addLayer(
+                realtime_893d5e79113e5c3f789593e73fd6dd76._container
             );
         
     
-            realtime_159200322c05617048d3820a5cadc5c5.addTo(map_9e92ea505ad7308e074a1a9891cd94dd);
+            realtime_893d5e79113e5c3f789593e73fd6dd76.addTo(map_5d11f98baad8da9070a9e41f60ac1c5a);
         
 </script>
 </html>

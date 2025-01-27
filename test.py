@@ -20,6 +20,7 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 generation = 0
+best_fitness = np.inf
 geojson_data = {"type": "FeatureCollection", "features": []}
 lock = threading.Lock()
 
@@ -44,64 +45,81 @@ def get_coordinates(municipality):
     return row.iloc[0]["Longitude"], row.iloc[0]["Latitude"]
 
 
+def calc_fitness(solution):
+    """Calculate the the total distance of a series of municipalities, ending at the first"""
+    fitness = 0
+    for i in range(len(solution) - 1):
+        fitness += distance_matrix.loc[solution[i], solution[i+1]]
+    fitness += distance_matrix.loc[solution[-1], solution[0]]
+    return fitness
+
+
 def generate_geojson():
     """Continuously generate a new GeoJSON route every 2 seconds."""
     global generation
+    global best_fitness
     global geojson_data
     while True:
+        time.sleep(1)
+
         municipalities = list(np.random.choice(df["Municipality"].values, 50, replace=False))
-        route_coords = [get_coordinates(m) for m in municipalities]
-        features = []
+        fitness = calc_fitness(municipalities)
 
-        for i, municipality in enumerate(municipalities):
-            lon, lat = get_coordinates(municipality)
-            features.append({
-                "type": "Feature",
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [lon, lat]
-                },
-                "properties": {
-                    "id": municipality,
-                    "order": i + 1,
-                    "popup": municipality
-                }
-            })
+        if fitness < best_fitness:
+            route_coords = [get_coordinates(m) for m in municipalities]
+            features = []
 
-        for i in range(len(route_coords) - 1):
-            municipality = municipalities[i]
-            distance = distance_matrix.loc[municipalities[i], municipalities[i+1]]
-            color = get_color(municipality, distance)
+            for i, municipality in enumerate(municipalities):
+                lon, lat = get_coordinates(municipality)
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [lon, lat]
+                    },
+                    "properties": {
+                        "id": municipality,
+                        "order": i + 1,
+                        "popup": municipality
+                    }
+                })
 
-            features.append({
-                "type": "Feature",
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": [
-                        [route_coords[i][0], route_coords[i][1]],
-                        [route_coords[i+1][0], route_coords[i+1][1]]
-                    ]
-                },
-                "properties": {
-                    "id": f"line-{i}",
-                    "color": color,
-                    "weight": 4,
-                    "opacity": 1
-                }
-            })
+            for i in range(len(route_coords) - 1):
+                municipality = municipalities[i]
+                distance = distance_matrix.loc[municipalities[i], municipalities[i+1]]
+                color = get_color(municipality, distance)
+
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [
+                            [route_coords[i][0], route_coords[i][1]],
+                            [route_coords[i+1][0], route_coords[i+1][1]]
+                        ]
+                    },
+                    "properties": {
+                        "id": f"line-{i}",
+                        "color": color,
+                        "weight": 4,
+                        "opacity": 1
+                    }
+                })
 
         with lock:
             generation += 1
-            geojson_data = {"type": "FeatureCollection", "features": features}
-        time.sleep(2)
+            if fitness < best_fitness:
+                best_fitness = fitness
+                geojson_data = {"type": "FeatureCollection", "features": features}
 
 
 @app.route("/route.geojson")
 def serve_geojson():
     with lock:
         resp = jsonify(geojson_data)
-        resp.headers["Access-Control-Expose-Headers"] = "Generation"
+        resp.headers["Access-Control-Expose-Headers"] = "Generation, Best-Fitness"
         resp.headers["Generation"] = generation
+        resp.headers["Best-Fitness"] = f"{round(best_fitness)} km"
     return resp
 
 
@@ -110,7 +128,7 @@ def show_map():
     html_file = "cycling_route_map.html"
     mean_lat, mean_lon = 52.0205272081141, 4.537304129039721
     m = folium.Map(location=[mean_lat, mean_lon], zoom_start=10)
-    title_html = '<h1 style="position:absolute;z-index:100000;left:6rem" >Generation: <span id=gen></span></h1>'
+    title_html = '<div style="position:absolute;z-index:100000;left:6rem"><h1 style="margin-bottom:0">Generation: <span id=gen></span></h1><h2>Best Fitness: <span id=fit></span></h2></div>'
     m.get_root().html.add_child(folium.Element(title_html))
     m.add_js_link("BeautifyMarkerJS",
                   "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.js")
@@ -127,6 +145,7 @@ def show_map():
                     .then(function(response) {{
                         console.log(response.headers.get('Generation'));
                         document.getElementById('gen').innerText = response.headers.get('Generation');
+                        document.getElementById('fit').innerText = response.headers.get('Best-Fitness');
                         return response.json();
                     }})
                     .then(responseHandler)
