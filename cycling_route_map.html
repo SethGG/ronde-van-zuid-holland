@@ -27,7 +27,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
-                #map_e9c22dd0fc4b300109437c5e04dd63c6 {
+                #map_9e92ea505ad7308e074a1a9891cd94dd {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -41,17 +41,18 @@
 </head>
 <body>
     
+    <h1 style="position:absolute;z-index:100000;left:6rem" >Generation: <span id=gen></span></h1>
     
-            <div class="folium-map" id="map_e9c22dd0fc4b300109437c5e04dd63c6" ></div>
+            <div class="folium-map" id="map_9e92ea505ad7308e074a1a9891cd94dd" ></div>
         
 </body>
 <script>
     
     
-            var map_e9c22dd0fc4b300109437c5e04dd63c6 = L.map(
-                "map_e9c22dd0fc4b300109437c5e04dd63c6",
+            var map_9e92ea505ad7308e074a1a9891cd94dd = L.map(
+                "map_9e92ea505ad7308e074a1a9891cd94dd",
                 {
-                    center: [52.01316758449766, 4.438632433358289],
+                    center: [52.0205272081141, 4.537304129039721],
                     crs: L.CRS.EPSG3857,
                     ...{
   "zoom": 10,
@@ -66,7 +67,7 @@
 
         
     
-            var tile_layer_aa90c632fab1877c09af7275f89db066 = L.tileLayer(
+            var tile_layer_9433e72c3882684d0680cdf7f1e6ea27 = L.tileLayer(
                 "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                 {
   "minZoom": 0,
@@ -83,13 +84,24 @@
             );
         
     
-            tile_layer_aa90c632fab1877c09af7275f89db066.addTo(map_e9c22dd0fc4b300109437c5e04dd63c6);
+            tile_layer_9433e72c3882684d0680cdf7f1e6ea27.addTo(map_9e92ea505ad7308e074a1a9891cd94dd);
         
     
-            var realtime_2eb1d2841fd939bae823f87a895ac675 = L.realtime(
-            "http://127.0.0.1:5000/route.geojson",
+            var realtime_159200322c05617048d3820a5cadc5c5 = L.realtime(
+            (responseHandler, errorHandler) => {
+                    url = 'http://127.0.0.1:5000/route.geojson';
+
+                    fetch(url)
+                    .then(function(response) {
+                        console.log(response.headers.get('Generation'));
+                        document.getElementById('gen').innerText = response.headers.get('Generation');
+                        return response.json();
+                    })
+                    .then(responseHandler)
+                    .catch(errorHandler);
+                }
+            ,
             {
-  "name": "Live Route",
   "pointToLayer": (f, latlng) => {
                 options = {
                     isAlphaNumericIcon: true,
@@ -113,18 +125,18 @@
                 return {color: f.properties.color, weight: f.properties.weight, opacity: f.properties.opacity};
             },
   "start": true,
-  "interval": 2000,
+  "interval": 100,
   "updateFeature": () => { return; }
             ,
   "removeMissing": false,
 }
             );
-            map_e9c22dd0fc4b300109437c5e04dd63c6.addLayer(
-                realtime_2eb1d2841fd939bae823f87a895ac675._container
+            map_9e92ea505ad7308e074a1a9891cd94dd.addLayer(
+                realtime_159200322c05617048d3820a5cadc5c5._container
             );
         
     
-            realtime_2eb1d2841fd939bae823f87a895ac675.addTo(map_e9c22dd0fc4b300109437c5e04dd63c6);
+            realtime_159200322c05617048d3820a5cadc5c5.addTo(map_9e92ea505ad7308e074a1a9891cd94dd);
         
 </script>
 </html>

@@ -1,13 +1,11 @@
 import pandas as pd
 import numpy as np
 import folium
-from folium.plugins import BeautifyIcon, Realtime
+from folium.plugins import Realtime
 import matplotlib
 import matplotlib.colors as mcolors
-import numpy as np
 import threading
 import time
-import json
 import webview
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -20,7 +18,10 @@ distance_matrix = pd.read_csv("cycling_distance_matrix.csv", index_col=0)
 # Flask app to serve GeoJSON
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+generation = 0
 geojson_data = {"type": "FeatureCollection", "features": []}
+lock = threading.Lock()
 
 
 def get_color(municipality, distance):
@@ -45,6 +46,7 @@ def get_coordinates(municipality):
 
 def generate_geojson():
     """Continuously generate a new GeoJSON route every 2 seconds."""
+    global generation
     global geojson_data
     while True:
         municipalities = list(np.random.choice(df["Municipality"].values, 50, replace=False))
@@ -88,28 +90,50 @@ def generate_geojson():
                 }
             })
 
-        geojson_data = {"type": "FeatureCollection", "features": features}
+        with lock:
+            generation += 1
+            geojson_data = {"type": "FeatureCollection", "features": features}
         time.sleep(2)
 
 
 @app.route("/route.geojson")
 def serve_geojson():
-    return jsonify(geojson_data)
+    with lock:
+        resp = jsonify(geojson_data)
+        resp.headers["Access-Control-Expose-Headers"] = "Generation"
+        resp.headers["Generation"] = generation
+    return resp
 
 
 def show_map():
     """Display a map with a dynamic cycling route using Folium's Realtime plugin."""
     html_file = "cycling_route_map.html"
-    mean_lon, mean_lat = get_coordinates("Pijnacker-Nootdorp")
+    mean_lat, mean_lon = 52.0205272081141, 4.537304129039721
     m = folium.Map(location=[mean_lat, mean_lon], zoom_start=10)
+    title_html = '<h1 style="position:absolute;z-index:100000;left:6rem" >Generation: <span id=gen></span></h1>'
+    m.get_root().html.add_child(folium.Element(title_html))
     m.add_js_link("BeautifyMarkerJS",
                   "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.js")
     m.add_css_link("BeautifyMarkerCSS",
                    "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.css")
+    url = "http://127.0.0.1:5000/route.geojson"
     realtime = Realtime(
-        "http://127.0.0.1:5000/route.geojson",
-        name="Live Route",
-        interval=2000,
+        interval=100,
+        source=folium.JsCode(
+            """(responseHandler, errorHandler) => {{
+                    url = '{url}';
+
+                    fetch(url)
+                    .then(function(response) {{
+                        console.log(response.headers.get('Generation'));
+                        document.getElementById('gen').innerText = response.headers.get('Generation');
+                        return response.json();
+                    }})
+                    .then(responseHandler)
+                    .catch(errorHandler);
+                }}
+            """.format(url=url)
+        ),
         update_feature=folium.JsCode(
             """() => { return; }
             """
