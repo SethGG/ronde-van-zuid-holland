@@ -5,23 +5,36 @@ from folium.plugins import Realtime
 import matplotlib
 import matplotlib.colors as mcolors
 import threading
-import time
 import webview
 from flask import Flask, jsonify
-from flask_cors import CORS
 
 # Load data
 df = pd.read_csv("gemeentehuizen.csv", index_col=0)
 distance_matrix = pd.read_csv("cycling_distance_matrix.csv", index_col=0)
 
-# Flask app to serve GeoJSON
-app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
-
+# Global variables and lock
 generation = 0
 global_best_fitness = np.inf
 geojson_data = {"type": "FeatureCollection", "features": []}
 lock = threading.Lock()
+
+# Flask app to serve GeoJSON
+app = Flask(__name__)
+
+
+@app.route("/")
+def serve_map():
+    m = generate_map()
+    return m.get_root().render()
+
+
+@app.route("/route.geojson")
+def serve_geojson():
+    with lock:
+        resp = jsonify(geojson_data)
+        resp.headers["Generation"] = generation
+        resp.headers["Best-Fitness"] = f"{round(global_best_fitness)} km"
+    return resp
 
 
 def get_color(municipality, distance):
@@ -53,7 +66,7 @@ def calc_fitness(start_municipality, solution):
     return fitness
 
 
-def genetic_algorihtm(start_municipality="Leiden", population_size=100, elitism_prop=0.1, mutation_rate=0.8):
+def genetic_algorihtm(start_municipality="Leiden", population_size=30, elitism_size=3, mutation_rate=0.5):
     """Implementation of a GA for finding a solution with a low fitness score"""
 
     remaining_municipalities = df.index.drop(start_municipality)
@@ -76,7 +89,7 @@ def genetic_algorihtm(start_municipality="Leiden", population_size=100, elitism_
                 geojson_data = generate_geojson([start_municipality]+best_solution)
 
         # Perform elitism
-        new_population = sorted_population[:int(population_size*elitism_prop)]
+        new_population = sorted_population[:elitism_size]
 
         # Perform selection
         props = np.array([p[1] for p in population])
@@ -84,7 +97,7 @@ def genetic_algorihtm(start_municipality="Leiden", population_size=100, elitism_
         while len(new_population) < population_size:
             parent1, parent2 = (population[choice][0] for choice in np.random.choice(
                 len(population), size=2, replace=False, p=props))
-            # Perform crossover
+            # Perform PMX crossover
             child1, child2 = [], []
             crossover_idx1, crossover_idx2 = sorted(np.random.choice(len(parent1)+1, size=2, replace=False))
             for idx in range(len(parent1)):
@@ -98,15 +111,12 @@ def genetic_algorihtm(start_municipality="Leiden", population_size=100, elitism_
                             candidate_idx = other_parent.index(candidate)
                             candidate = parent[candidate_idx]
                         child.append(candidate)
-            # Perform mutation
+            # Perform inversion mutation
             for child in (child1, child2):
                 if np.random.rand() <= mutation_rate:
-                    mutation_idx1 = np.random.choice(len(parent1))
-                    mutation_idx2 = np.random.choice(len(parent1)+1)
-                    insert = child[mutation_idx1]
-                    child[mutation_idx1] = None
-                    child.insert(mutation_idx2, insert)
-                    child.remove(None)
+                    mutation_idx1, mutation_idx2 = sorted(np.random.choice(len(parent1)+1, size=2, replace=False))
+                    mutation_idx1_inverse = mutation_idx1 - 1 if mutation_idx1 > 0 else None
+                    child[mutation_idx1: mutation_idx2] = child[mutation_idx2 - 1: mutation_idx1_inverse: -1]
 
                     new_population.append((child, calc_fitness(start_municipality, child)))
 
@@ -158,19 +168,8 @@ def generate_geojson(solution):
     return {"type": "FeatureCollection", "features": features}
 
 
-@ app.route("/route.geojson")
-def serve_geojson():
-    with lock:
-        resp = jsonify(geojson_data)
-        resp.headers["Access-Control-Expose-Headers"] = "Generation, Best-Fitness"
-        resp.headers["Generation"] = generation
-        resp.headers["Best-Fitness"] = f"{round(global_best_fitness)} km"
-    return resp
-
-
-def show_map():
+def generate_map():
     """Display a map with a dynamic cycling route using Folium's Realtime plugin."""
-    html_file = "cycling_route_map.html"
     mean_lat, mean_lon = 52.0205272081141, 4.537304129039721
     m = folium.Map(location=[mean_lat, mean_lon], zoom_start=10)
     title_html = '<div style="position:absolute;z-index:100000;left:6rem">\
@@ -183,7 +182,7 @@ def show_map():
                    "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.css")
     url = "http://127.0.0.1:5000/route.geojson"
     realtime = Realtime(
-        interval=200,
+        interval=100,
         source=folium.JsCode(
             """(responseHandler, errorHandler) => {{
                     url = '{url}';
@@ -234,14 +233,13 @@ def show_map():
         )
     )
     realtime.add_to(m)
-    m.save(html_file)
 
-    webview.create_window("Live Cycling Route", html_file, height=700)
-    webview.start()
+    return m
 
 
 if __name__ == "__main__":
-    # genetic_algorihtm()
     threading.Thread(target=genetic_algorihtm, daemon=True).start()
     threading.Thread(target=app.run, kwargs={"port": 5000}, daemon=True).start()
-    show_map()
+
+    webview.create_window("Live Cycling Route", url="http://127.0.0.1:5000", height=700)
+    webview.start()
