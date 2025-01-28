@@ -27,7 +27,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
-                #map_5d11f98baad8da9070a9e41f60ac1c5a {
+                #map_a4c0b64eb7d2ce5e58db1abffdcdf0bd {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -41,16 +41,16 @@
 </head>
 <body>
     
-    <div style="position:absolute;z-index:100000;left:6rem"><h1 style="margin-bottom:0">Generation: <span id=gen></span></h1><h2>Best Fitness: <span id=fit></span></h2></div>
+    <div style="position:absolute;z-index:100000;left:6rem">        <h1 style="margin-bottom:0">Generation: <span id=gen></span></h1>        <h2>Best Fitness: <span id=fit></span></h2></div>
     
-            <div class="folium-map" id="map_5d11f98baad8da9070a9e41f60ac1c5a" ></div>
+            <div class="folium-map" id="map_a4c0b64eb7d2ce5e58db1abffdcdf0bd" ></div>
         
 </body>
 <script>
     
     
-            var map_5d11f98baad8da9070a9e41f60ac1c5a = L.map(
-                "map_5d11f98baad8da9070a9e41f60ac1c5a",
+            var map_a4c0b64eb7d2ce5e58db1abffdcdf0bd = L.map(
+                "map_a4c0b64eb7d2ce5e58db1abffdcdf0bd",
                 {
                     center: [52.0205272081141, 4.537304129039721],
                     crs: L.CRS.EPSG3857,
@@ -67,7 +67,7 @@
 
         
     
-            var tile_layer_fd58b6a38b70087fb45dd7913f2a255d = L.tileLayer(
+            var tile_layer_ea513172f5cd9fa150bc4fc093feb390 = L.tileLayer(
                 "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                 {
   "minZoom": 0,
@@ -84,10 +84,10 @@
             );
         
     
-            tile_layer_fd58b6a38b70087fb45dd7913f2a255d.addTo(map_5d11f98baad8da9070a9e41f60ac1c5a);
+            tile_layer_ea513172f5cd9fa150bc4fc093feb390.addTo(map_a4c0b64eb7d2ce5e58db1abffdcdf0bd);
         
     
-            var realtime_893d5e79113e5c3f789593e73fd6dd76 = L.realtime(
+            var realtime_cf212eb055afc89139ebe65a22142937 = L.realtime(
             (responseHandler, errorHandler) => {
                     url = 'http://127.0.0.1:5000/route.geojson';
 
@@ -119,25 +119,25 @@
                 layer.bindPopup(f.properties.popup);
                 }
             ,
-  "style": (f) => { 
+  "style": (f) => {
                 if (f.geometry.type === 'Point') {
                     return {color: 'black', fillColor: 'white', radius: 8};
                 }
                 return {color: f.properties.color, weight: f.properties.weight, opacity: f.properties.opacity};
             },
   "start": true,
-  "interval": 100,
+  "interval": 200,
   "updateFeature": () => { return; }
             ,
   "removeMissing": false,
 }
             );
-            map_5d11f98baad8da9070a9e41f60ac1c5a.addLayer(
-                realtime_893d5e79113e5c3f789593e73fd6dd76._container
+            map_a4c0b64eb7d2ce5e58db1abffdcdf0bd.addLayer(
+                realtime_cf212eb055afc89139ebe65a22142937._container
             );
         
     
-            realtime_893d5e79113e5c3f789593e73fd6dd76.addTo(map_5d11f98baad8da9070a9e41f60ac1c5a);
+            realtime_cf212eb055afc89139ebe65a22142937.addTo(map_a4c0b64eb7d2ce5e58db1abffdcdf0bd);
         
 </script>
 </html>

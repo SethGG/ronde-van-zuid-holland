@@ -11,8 +11,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 # Load data
-df = pd.read_csv("gemeentehuizen.csv")
-df.columns = ["Municipality", "Latitude", "Longitude"]
+df = pd.read_csv("gemeentehuizen.csv", index_col=0)
 distance_matrix = pd.read_csv("cycling_distance_matrix.csv", index_col=0)
 
 # Flask app to serve GeoJSON
@@ -20,7 +19,7 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 generation = 0
-best_fitness = np.inf
+global_best_fitness = np.inf
 geojson_data = {"type": "FeatureCollection", "features": []}
 lock = threading.Lock()
 
@@ -39,87 +38,133 @@ def get_color(municipality, distance):
 
 def get_coordinates(municipality):
     """Retrieve coordinates of a municipality from the CSV file."""
-    row = df[df["Municipality"] == municipality]
+    row = df.loc[municipality]
     if row.empty:
         raise ValueError(f"Municipality '{municipality}' not found in dataset.")
-    return row.iloc[0]["Longitude"], row.iloc[0]["Latitude"]
+    return row.loc["Longitude"], row.loc["Latitude"]
 
 
-def calc_fitness(solution):
+def calc_fitness(start_municipality, solution):
     """Calculate the the total distance of a series of municipalities, ending at the first"""
-    fitness = 0
+    fitness = distance_matrix.loc[start_municipality, solution[0]]
     for i in range(len(solution) - 1):
         fitness += distance_matrix.loc[solution[i], solution[i+1]]
-    fitness += distance_matrix.loc[solution[-1], solution[0]]
+    fitness += distance_matrix.loc[solution[-1], start_municipality]
     return fitness
 
 
-def generate_geojson():
-    """Continuously generate a new GeoJSON route every 2 seconds."""
+def genetic_algorihtm(start_municipality="Leiden", population_size=100, elitism_prop=0.1, mutation_rate=0.8):
+    """Implementation of a GA for finding a solution with a low fitness score"""
+
+    remaining_municipalities = df.index.drop(start_municipality)
+    solutions = [list(np.random.choice(remaining_municipalities, size=remaining_municipalities.shape[0],
+                                       replace=False)) for _ in range(population_size)]
+    population = [(s, calc_fitness(start_municipality, s)) for s in solutions]
+
     global generation
-    global best_fitness
+    global global_best_fitness
     global geojson_data
+
     while True:
-        time.sleep(1)
-
-        municipalities = list(np.random.choice(df["Municipality"].values, 50, replace=False))
-        fitness = calc_fitness(municipalities)
-
-        if fitness < best_fitness:
-            route_coords = [get_coordinates(m) for m in municipalities]
-            features = []
-
-            for i, municipality in enumerate(municipalities):
-                lon, lat = get_coordinates(municipality)
-                features.append({
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [lon, lat]
-                    },
-                    "properties": {
-                        "id": municipality,
-                        "order": i + 1,
-                        "popup": municipality
-                    }
-                })
-
-            for i in range(len(route_coords) - 1):
-                municipality = municipalities[i]
-                distance = distance_matrix.loc[municipalities[i], municipalities[i+1]]
-                color = get_color(municipality, distance)
-
-                features.append({
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "LineString",
-                        "coordinates": [
-                            [route_coords[i][0], route_coords[i][1]],
-                            [route_coords[i+1][0], route_coords[i+1][1]]
-                        ]
-                    },
-                    "properties": {
-                        "id": f"line-{i}",
-                        "color": color,
-                        "weight": 4,
-                        "opacity": 1
-                    }
-                })
+        sorted_population = sorted(population, key=lambda p: p[1])
+        best_solution, best_fitness = sorted_population[0]
 
         with lock:
             generation += 1
-            if fitness < best_fitness:
-                best_fitness = fitness
-                geojson_data = {"type": "FeatureCollection", "features": features}
+            if best_fitness < global_best_fitness:
+                global_best_fitness = best_fitness
+                geojson_data = generate_geojson([start_municipality]+best_solution)
+
+        # Perform elitism
+        new_population = sorted_population[:int(population_size*elitism_prop)]
+
+        # Perform selection
+        props = np.array([p[1] for p in population])
+        props /= props.sum()
+        while len(new_population) < population_size:
+            parent1, parent2 = (population[choice][0] for choice in np.random.choice(
+                len(population), size=2, replace=False, p=props))
+            # Perform crossover
+            child1, child2 = [], []
+            crossover_idx1, crossover_idx2 = sorted(np.random.choice(len(parent1)+1, size=2, replace=False))
+            for idx in range(len(parent1)):
+                if idx >= crossover_idx1 and idx < crossover_idx2:
+                    child1.append(parent2[idx])
+                    child2.append(parent1[idx])
+                else:
+                    for parent, other_parent, child in ((parent1, parent2, child1), (parent2, parent1, child2)):
+                        candidate = parent[idx]
+                        while candidate in other_parent[crossover_idx1:crossover_idx2]:
+                            candidate_idx = other_parent.index(candidate)
+                            candidate = parent[candidate_idx]
+                        child.append(candidate)
+            # Perform mutation
+            for child in (child1, child2):
+                if np.random.rand() <= mutation_rate:
+                    mutation_idx1 = np.random.choice(len(parent1))
+                    mutation_idx2 = np.random.choice(len(parent1)+1)
+                    insert = child[mutation_idx1]
+                    child[mutation_idx1] = None
+                    child.insert(mutation_idx2, insert)
+                    child.remove(None)
+
+                    new_population.append((child, calc_fitness(start_municipality, child)))
+
+        population = new_population
 
 
-@app.route("/route.geojson")
+def generate_geojson(solution):
+    """Continuously generate a new GeoJSON route every 2 seconds."""
+    route_coords = [get_coordinates(m) for m in solution]
+    features = []
+
+    for i, municipality in enumerate(solution):
+        lon, lat = get_coordinates(municipality)
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lon, lat]
+            },
+            "properties": {
+                "id": municipality,
+                "order": i + 1,
+                "popup": municipality
+            }
+        })
+
+    for i in range(len(route_coords) - 1):
+        municipality = solution[i]
+        distance = distance_matrix.loc[solution[i], solution[i+1]]
+        color = get_color(municipality, distance)
+
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [route_coords[i][0], route_coords[i][1]],
+                    [route_coords[i+1][0], route_coords[i+1][1]]
+                ]
+            },
+            "properties": {
+                "id": f"line-{i}",
+                "color": color,
+                "weight": 4,
+                "opacity": 1
+            }
+        })
+
+    return {"type": "FeatureCollection", "features": features}
+
+
+@ app.route("/route.geojson")
 def serve_geojson():
     with lock:
         resp = jsonify(geojson_data)
         resp.headers["Access-Control-Expose-Headers"] = "Generation, Best-Fitness"
         resp.headers["Generation"] = generation
-        resp.headers["Best-Fitness"] = f"{round(best_fitness)} km"
+        resp.headers["Best-Fitness"] = f"{round(global_best_fitness)} km"
     return resp
 
 
@@ -128,7 +173,9 @@ def show_map():
     html_file = "cycling_route_map.html"
     mean_lat, mean_lon = 52.0205272081141, 4.537304129039721
     m = folium.Map(location=[mean_lat, mean_lon], zoom_start=10)
-    title_html = '<div style="position:absolute;z-index:100000;left:6rem"><h1 style="margin-bottom:0">Generation: <span id=gen></span></h1><h2>Best Fitness: <span id=fit></span></h2></div>'
+    title_html = '<div style="position:absolute;z-index:100000;left:6rem">\
+        <h1 style="margin-bottom:0">Generation: <span id=gen></span></h1>\
+        <h2>Best Fitness: <span id=fit></span></h2></div>'
     m.get_root().html.add_child(folium.Element(title_html))
     m.add_js_link("BeautifyMarkerJS",
                   "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.js")
@@ -136,7 +183,7 @@ def show_map():
                    "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.css")
     url = "http://127.0.0.1:5000/route.geojson"
     realtime = Realtime(
-        interval=100,
+        interval=200,
         source=folium.JsCode(
             """(responseHandler, errorHandler) => {{
                     url = '{url}';
@@ -178,7 +225,7 @@ def show_map():
             """
         ),
         style=folium.JsCode(
-            """(f) => { 
+            """(f) => {
                 if (f.geometry.type === 'Point') {
                     return {color: 'black', fillColor: 'white', radius: 8};
                 }
@@ -194,6 +241,7 @@ def show_map():
 
 
 if __name__ == "__main__":
-    threading.Thread(target=generate_geojson, daemon=True).start()
+    # genetic_algorihtm()
+    threading.Thread(target=genetic_algorihtm, daemon=True).start()
     threading.Thread(target=app.run, kwargs={"port": 5000}, daemon=True).start()
     show_map()
