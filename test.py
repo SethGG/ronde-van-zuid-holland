@@ -66,7 +66,7 @@ def calc_fitness(start_municipality, solution):
     return fitness
 
 
-def genetic_algorihtm(start_municipality="Leiden", population_size=30, elitism_size=3, mutation_rate=0.5):
+def genetic_algorihtm(start_municipality="Leiden", population_size=30, elitism_size=3, tournament_size=5, mutation_rate=0.1):
     """Implementation of a GA for finding a solution with a low fitness score"""
 
     remaining_municipalities = df.index.drop(start_municipality)
@@ -91,12 +91,15 @@ def genetic_algorihtm(start_municipality="Leiden", population_size=30, elitism_s
         # Perform elitism
         new_population = sorted_population[:elitism_size]
 
-        # Perform selection
-        props = np.array([p[1] for p in population])
-        props /= props.sum()
         while len(new_population) < population_size:
-            parent1, parent2 = (population[choice][0] for choice in np.random.choice(
-                len(population), size=2, replace=False, p=props))
+            # Perform tournament selection
+            def run_tournament():
+                pool = sorted((population[choice] for choice in np.random.choice(
+                    len(population), size=tournament_size, replace=False)), key=lambda p: p[1])
+                return pool[0][0]
+            parent1 = run_tournament()
+            parent2 = run_tournament()
+
             # Perform PMX crossover
             child1, child2 = [], []
             crossover_idx1, crossover_idx2 = sorted(np.random.choice(len(parent1)+1, size=2, replace=False))
@@ -182,7 +185,7 @@ def generate_map():
                    "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.css")
     url = "http://127.0.0.1:5000/route.geojson"
     realtime = Realtime(
-        interval=100,
+        interval=500,
         source=folium.JsCode(
             """(responseHandler, errorHandler) => {{
                     url = '{url}';
