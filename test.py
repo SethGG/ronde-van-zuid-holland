@@ -25,16 +25,7 @@ for city_idx in range(distance_np.shape[0]):
     norm_rank_matrix[city_idx, sorted_indices[city_idx]] = np.linspace(0, 1, distance_np.shape[1])
 
 
-# Manager for shared state
-manager = multiprocessing.Manager()
-repetition = manager.Value("i", 0)
-generation = manager.Value("i", 0)
-global_best_fitness = manager.Value("d", np.inf)
-geojson_data = manager.dict({"type": "FeatureCollection", "features": []})
-lock = manager.Lock()
-
-
-def create_flask():
+def create_flask(ga: "GeneticAlgorithm"):
     # Flask app to serve GeoJSON
     app = Flask(__name__)
     log = logging.getLogger('werkzeug')
@@ -47,19 +38,22 @@ def create_flask():
 
     @app.route("/route.geojson")
     def serve_geojson():
-        with lock:
-            resp = jsonify(geojson_data.copy())  # Convert manager.dict() to regular dict
-            resp.headers["Repetition"] = repetition.value
-            resp.headers["Generation"] = generation.value
-            resp.headers["Best-Fitness"] = f"{round(global_best_fitness.value)} km" \
-                if global_best_fitness.value < np.inf else ""
-        return resp
+        track_vars = ga.get_tracking_vars()
+        if track_vars and track_vars["generation"] > 0:
+            resp = jsonify(generate_geojson(ga.start_idx, track_vars["best_solution"]))
+            # resp.headers["Repetition"] = repetition.value
+            resp.headers["Generation"] = track_vars["generation"]
+            resp.headers["Best-Fitness"] = f"{round(track_vars['best_fitness'])} km" \
+                if track_vars["best_fitness"] < np.inf else ""
+            return resp
+        else:
+            return jsonify({"type": "FeatureCollection", "features": []})  # Empty response if not tracking
 
     return app
 
 
-def flask_process():
-    app = create_flask()
+def flask_process(ga: "GeneticAlgorithm"):
+    app = create_flask(ga)
     app.run(port=5000)
 
 
@@ -88,104 +82,148 @@ def calc_fitness(start_idx, solutions_idx):
     return fitness_values
 
 
-def run_repetitions(reps=10, wait=0):
+def run_repetitions(ga: "GeneticAlgorithm", reps=20, wait=0):
     time.sleep(wait)
     for _ in range(reps):
-        with lock:
-            repetition.value += 1
-        genetic_algorithm()
+        ga.run()
 
 
-def genetic_algorithm(start_municipality="Leiden", population_size=30, elitism_size=3, tournament_size=5,
-                      mutation_rate=0.3, max_generations=1000):
-    """Implementation of a GA for finding a solution with a low fitness score"""
+class GeneticAlgorithm:
+    def __init__(self, start_municipality="Leiden", population_size=30, elitism_size=3, tournament_size=5,
+                 mutation_rate=0.3, max_generations=1000, track_globals=False):
+        """Encapsulates the Genetic Algorithm to allow optional tracking of global variables."""
+        self.start_municipality = start_municipality
+        self.start_idx = index_map[start_municipality]
+        self.population_size = population_size
+        self.elitism_size = elitism_size
+        self.tournament_size = tournament_size
+        self.mutation_rate = mutation_rate
+        self.max_generations = max_generations
+        self.track_globals = track_globals
 
-    start_idx = index_map[start_municipality]
-    remaining_municipalities_idx = np.array([index_map[city] for city in df.index.drop(start_municipality)])
-    solutions = np.array([np.random.permutation(remaining_municipalities_idx) for _ in range(population_size)])
-    fitness_scores = calc_fitness(start_idx, solutions)
-    population = np.array([[s, f] for s, f in zip(solutions, fitness_scores)], dtype=object)
+        if self.track_globals:
+            self.generation = multiprocessing.Value("i", 0)
+            self.global_best_fitness = multiprocessing.Value("d", np.inf)
+            # Shared array for solution (size = num_cities - 1)
+            self.num_cities = len(df.index) - 1  # Excluding start city
+            self.global_best_solution = multiprocessing.RawArray('i', [-1]*self.num_cities)
+            self.lock = multiprocessing.Lock()
 
-    with lock:
-        generation.value = 0
+    def get_tracking_vars(self):
+        """Returns current values of tracking variables."""
+        if self.track_globals:
+            with self.lock:
+                solution_np = np.frombuffer(
+                    self.global_best_solution,
+                    dtype=np.int32
+                ).copy()  # Copy to avoid memory view issues
+                return {
+                    "generation": self.generation.value,
+                    "best_fitness": self.global_best_fitness.value,
+                    "best_solution": solution_np
+                }
+        return None  # If tracking is disabled, return nothing
 
-    while generation.value < max_generations:
-        best_solution, best_fitness = population[np.argmin(population[:, 1])]
+    def run(self):
+        """Runs the genetic algorithm, tracking the best solution if a queue is provided."""
+        start_idx = index_map[self.start_municipality]
+        remaining_municipalities_idx = np.array([index_map[city] for city in df.index.drop(self.start_municipality)])
+        solutions = np.array([np.random.permutation(remaining_municipalities_idx) for _ in range(self.population_size)])
+        fitness_scores = calc_fitness(start_idx, solutions)
+        population = np.array([[s, f] for s, f in zip(solutions, fitness_scores)], dtype=object)
 
-        with lock:
-            generation.value += 1
-            if best_fitness < global_best_fitness.value:
-                global_best_fitness.value = best_fitness
-                geojson_data.clear()
-                geojson_data.update(generate_geojson(start_idx, best_solution))
+        if self.track_globals:
+            with self.lock:
+                self.generation.value = 0
+                self.global_best_fitness.value = np.inf
+                # Reset shared array to invalid state (-1)
+                solution_np = np.frombuffer(self.global_best_solution, dtype=np.int32)
+                solution_np[:] = -1  # <--- This replaces the original list clearance
 
-        # Perform elitism
-        elite_population = population[np.argpartition(population[:, 1], elitism_size)[:elitism_size]]
+        for _ in range(self.max_generations):
+            best_solution, best_fitness = population[np.argmin(population[:, 1])]
 
-        # Generate new children
-        children = []
-        while len(children) < population_size - elitism_size:
-            # Perform tournament selection
-            def run_tournament():
-                pool = population[np.random.choice(population.shape[0], size=tournament_size, replace=False)]
-                winner = pool[np.argmin(pool[:, 1])]
-                return winner[0]
+            if self.track_globals:
+                with self.lock:
+                    self.generation.value += 1
+                    if best_fitness < self.global_best_fitness.value:
+                        self.global_best_fitness.value = best_fitness
+                        # Copy numpy array to shared memory
+                        solution_np = np.frombuffer(
+                            self.global_best_solution,
+                            dtype=np.int32
+                        )
+                        np.copyto(solution_np, best_solution)
 
-            parent1 = run_tournament()
-            parent2 = run_tournament()
+            # Perform elitism
+            elite_population = population[np.argpartition(population[:, 1], self.elitism_size)[:self.elitism_size]]
 
-            # Perform PMX crossover
-            def crossover(parent1, parent2):
-                crossover_idx1, crossover_idx2 = sorted(np.random.choice(parent1.shape[0] + 1, size=2, replace=False))
-                # Create crossover mapping
-                crossover_parent1 = parent1[crossover_idx1: crossover_idx2]
-                crossover_parent2 = parent2[crossover_idx1: crossover_idx2]
+            # Generate new children
+            children = []
+            while len(children) < self.population_size - self.elitism_size:
+                # Perform tournament selection
+                def run_tournament():
+                    pool = population[np.random.choice(population.shape[0], size=self.tournament_size, replace=False)]
+                    winner = pool[np.argmin(pool[:, 1])]
+                    return winner[0]
 
-                p1_to_p2_mapping = {}
-                for i in range(crossover_parent1.shape[0]):
-                    p1_to_p2_mapping[crossover_parent1[i]] = crossover_parent2[i]
+                parent1 = run_tournament()
+                parent2 = run_tournament()
 
-                bidirec_mapping = np.arange(parent1.shape[0]+1)
-                for i in p1_to_p2_mapping:
-                    if i not in p1_to_p2_mapping.values():
-                        j = p1_to_p2_mapping[i]
-                        while j in p1_to_p2_mapping:
-                            j = p1_to_p2_mapping[j]
-                        bidirec_mapping[i] = j
-                        bidirec_mapping[j] = i
+                # Perform PMX crossover
+                def crossover(parent1, parent2):
+                    crossover_idx1, crossover_idx2 = sorted(
+                        np.random.choice(parent1.shape[0] + 1, size=2, replace=False))
+                    # Create crossover mapping
+                    crossover_parent1 = parent1[crossover_idx1: crossover_idx2]
+                    crossover_parent2 = parent2[crossover_idx1: crossover_idx2]
 
-                child1 = np.concatenate((
-                    np.take(bidirec_mapping, parent1[:crossover_idx1]),
-                    crossover_parent2,
-                    np.take(bidirec_mapping, parent1[crossover_idx2:])
-                ))
-                child2 = np.concatenate((
-                    np.take(bidirec_mapping, parent2[:crossover_idx1]),
-                    crossover_parent1,
-                    np.take(bidirec_mapping, parent2[crossover_idx2:])
-                ))
+                    p1_to_p2_mapping = {}
+                    for i in range(crossover_parent1.shape[0]):
+                        p1_to_p2_mapping[crossover_parent1[i]] = crossover_parent2[i]
 
-                return child1, child2
+                    bidirec_mapping = np.arange(parent1.shape[0]+1)
+                    for i in p1_to_p2_mapping:
+                        if i not in p1_to_p2_mapping.values():
+                            j = p1_to_p2_mapping[i]
+                            while j in p1_to_p2_mapping:
+                                j = p1_to_p2_mapping[j]
+                            bidirec_mapping[i] = j
+                            bidirec_mapping[j] = i
 
-            child1, child2 = crossover(parent1, parent2)
+                    child1 = np.concatenate((
+                        np.take(bidirec_mapping, parent1[:crossover_idx1]),
+                        crossover_parent2,
+                        np.take(bidirec_mapping, parent1[crossover_idx2:])
+                    ))
+                    child2 = np.concatenate((
+                        np.take(bidirec_mapping, parent2[:crossover_idx1]),
+                        crossover_parent1,
+                        np.take(bidirec_mapping, parent2[crossover_idx2:])
+                    ))
 
-            # Perform inversion mutation
-            def mutate(child):
-                if np.random.rand() <= mutation_rate:
-                    mutation_idx1, mutation_idx2 = sorted(np.random.choice(parent1.shape[0]+1, size=2, replace=False))
-                    mutation_idx1_inverse = mutation_idx1 - 1 if mutation_idx1 > 0 else None
-                    child[mutation_idx1: mutation_idx2] = child[mutation_idx2 - 1: mutation_idx1_inverse: -1]
+                    return child1, child2
 
-            mutate(child1)
-            mutate(child2)
-            children.extend([child1, child2])
+                child1, child2 = crossover(parent1, parent2)
 
-        children = np.array(children)
-        children_fitness_scores = calc_fitness(start_idx, children)
-        children_population = np.array([[s, f] for s, f in zip(children, children_fitness_scores)], dtype=object)
-        new_population = np.concatenate((elite_population, children_population))
+                # Perform inversion mutation
+                def mutate(child):
+                    if np.random.rand() <= self.mutation_rate:
+                        mutation_idx1, mutation_idx2 = sorted(
+                            np.random.choice(parent1.shape[0]+1, size=2, replace=False))
+                        mutation_idx1_inverse = mutation_idx1 - 1 if mutation_idx1 > 0 else None
+                        child[mutation_idx1: mutation_idx2] = child[mutation_idx2 - 1: mutation_idx1_inverse: -1]
 
-        population = new_population[:population_size]
+                mutate(child1)
+                mutate(child2)
+                children.extend([child1, child2])
+
+            children = np.array(children)
+            children_fitness_scores = calc_fitness(start_idx, children)
+            children_population = np.array([[s, f] for s, f in zip(children, children_fitness_scores)], dtype=object)
+            new_population = np.concatenate((elite_population, children_population))
+
+            population = new_population[:self.population_size]
 
 
 def generate_geojson(start_idx, solution):
@@ -334,10 +372,12 @@ def generate_map(refresh_interval=100):
 
 
 if __name__ == "__main__":
-    flask_proc = multiprocessing.Process(target=flask_process, daemon=True)
+    ga = GeneticAlgorithm(track_globals=True)
+
+    flask_proc = multiprocessing.Process(target=flask_process, kwargs={"ga": ga}, daemon=True)
     flask_proc.start()
 
-    ga_proc = multiprocessing.Process(target=run_repetitions, kwargs={"wait": 2}, daemon=True)
+    ga_proc = multiprocessing.Process(target=run_repetitions, kwargs={"ga": ga, "wait": 2}, daemon=True)
     ga_proc.start()
 
     webview.create_window("Live Cycling Route", url="http://127.0.0.1:5000", height=700)
