@@ -89,8 +89,8 @@ def run_repetitions(ga: "GeneticAlgorithm", reps=20, wait=0):
 
 
 class GeneticAlgorithm:
-    def __init__(self, start_municipality="Leiden", population_size=30, elitism_size=3, tournament_size=5,
-                 mutation_rate=0.3, max_generations=1000, track_globals=False):
+    def __init__(self, start_municipality="Leiden", population_size=2500, elitism_size=3, tournament_size=5,
+                 crossover_rate=0.8, mutation_rate=0.2, max_generations=200, track_globals=False):
         """Encapsulates the Genetic Algorithm to allow optional tracking of global variables."""
         self.start_municipality = start_municipality
         self.start_idx = index_map[start_municipality]
@@ -98,6 +98,7 @@ class GeneticAlgorithm:
         self.elitism_size = elitism_size
         self.tournament_size = tournament_size
         self.mutation_rate = mutation_rate
+        self.crossover_rate = crossover_rate
         self.max_generations = max_generations
         self.track_globals = track_globals
 
@@ -204,18 +205,22 @@ class GeneticAlgorithm:
 
                     return child1, child2
 
-                child1, child2 = crossover(parent1, parent2)
+                if np.random.rand() < self.crossover_rate:
+                    child1, child2 = crossover(parent1, parent2)
+                else:
+                    child1, child2 = parent1.copy(), parent2.copy()
 
                 # Perform inversion mutation
                 def mutate(child):
-                    if np.random.rand() <= self.mutation_rate:
-                        mutation_idx1, mutation_idx2 = sorted(
-                            np.random.choice(parent1.shape[0]+1, size=2, replace=False))
-                        mutation_idx1_inverse = mutation_idx1 - 1 if mutation_idx1 > 0 else None
-                        child[mutation_idx1: mutation_idx2] = child[mutation_idx2 - 1: mutation_idx1_inverse: -1]
+                    mutation_idx1, mutation_idx2 = sorted(
+                        np.random.choice(parent1.shape[0]+1, size=2, replace=False))
+                    mutation_idx1_inverse = mutation_idx1 - 1 if mutation_idx1 > 0 else None
+                    child[mutation_idx1: mutation_idx2] = child[mutation_idx2 - 1: mutation_idx1_inverse: -1]
 
-                mutate(child1)
-                mutate(child2)
+                if np.random.rand() < self.mutation_rate:
+                    mutate(child1)
+                    mutate(child2)
+
                 children.extend([child1, child2])
 
             children = np.array(children)
