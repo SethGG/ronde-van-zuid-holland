@@ -25,7 +25,7 @@ for city_idx in range(distance_np.shape[0]):
     norm_rank_matrix[city_idx, sorted_indices[city_idx]] = np.linspace(0, 1, distance_np.shape[1])
 
 
-def create_flask(ga: "GeneticAlgorithm"):
+def create_flask(ga: "GeneticAlgorithm", reps: "RunRepetitions"):
     # Flask app to serve GeoJSON
     app = Flask(__name__)
     log = logging.getLogger('werkzeug')
@@ -41,7 +41,7 @@ def create_flask(ga: "GeneticAlgorithm"):
         track_vars = ga.get_tracking_vars()
         if track_vars and track_vars["generation"] > 0:
             resp = jsonify(generate_geojson(ga.start_idx, track_vars["best_solution"]))
-            # resp.headers["Repetition"] = repetition.value
+            resp.headers["Repetition"] = reps.get_rep()
             resp.headers["Generation"] = track_vars["generation"]
             resp.headers["Best-Fitness"] = f"{round(track_vars['best_fitness'])} km" \
                 if track_vars["best_fitness"] < np.inf else ""
@@ -52,8 +52,8 @@ def create_flask(ga: "GeneticAlgorithm"):
     return app
 
 
-def flask_process(ga: "GeneticAlgorithm"):
-    app = create_flask(ga)
+def flask_process(ga: "GeneticAlgorithm", reps: "RunRepetitions"):
+    app = create_flask(ga, reps)
     app.run(port=5000)
 
 
@@ -82,15 +82,30 @@ def calc_fitness(start_idx, solutions_idx):
     return fitness_values
 
 
-def run_repetitions(ga: "GeneticAlgorithm", reps=20, wait=0):
-    time.sleep(wait)
-    for _ in range(reps):
-        ga.run()
+class RunRepetitions:
+    def __init__(self, ga: "GeneticAlgorithm", reps, track_reps=False):
+        self.ga = ga
+        self.reps = reps
+        self.track_reps = track_reps
+
+        if self.track_reps:
+            self.repetition = multiprocessing.Value("i", 0)
+
+    def get_rep(self):
+        if self.track_reps:
+            return self.repetition.value
+        return None
+
+    def run(self, wait=0):
+        time.sleep(wait)
+        for _ in range(self.reps):
+            self.repetition.value += 1
+            ga.run()
 
 
 class GeneticAlgorithm:
-    def __init__(self, start_municipality="Leiden", population_size=2500, elitism_size=3, tournament_size=5,
-                 crossover_rate=0.8, mutation_rate=0.2, max_generations=200, track_globals=False):
+    def __init__(self, start_municipality="Leiden", population_size=2500, elitism_size=2, tournament_size=4,
+                 crossover_rate=0.9, mutation_rate=0.2, max_generations=200, track_globals=False):
         """Encapsulates the Genetic Algorithm to allow optional tracking of global variables."""
         self.start_municipality = start_municipality
         self.start_idx = index_map[start_municipality]
@@ -378,11 +393,12 @@ def generate_map(refresh_interval=100):
 
 if __name__ == "__main__":
     ga = GeneticAlgorithm(track_globals=True)
+    reps = RunRepetitions(ga, reps=10, track_reps=True)
 
-    flask_proc = multiprocessing.Process(target=flask_process, kwargs={"ga": ga}, daemon=True)
+    flask_proc = multiprocessing.Process(target=flask_process, kwargs={"ga": ga, "reps": reps}, daemon=True)
     flask_proc.start()
 
-    ga_proc = multiprocessing.Process(target=run_repetitions, kwargs={"ga": ga, "wait": 2}, daemon=True)
+    ga_proc = multiprocessing.Process(target=reps.run, kwargs={"wait": 2}, daemon=True)
     ga_proc.start()
 
     webview.create_window("Live Cycling Route", url="http://127.0.0.1:5000", height=700)
